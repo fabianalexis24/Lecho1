@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>ChemSim AR</title>
+
+<script src="https://aframe.io/releases/1.3.0/aframe.min.js"></script>
+<script src="https://raw.githack.com/AR-js-org/AR.js/master/aframe/build/aframe-ar.js"></script>
+
+<style>
+*{ box-sizing:border-box; margin:0; padding:0; font-family:'Segoe UI', system-ui, sans-serif; user-select:none; }
+body{ overflow:hidden; }
+
+:root{
+    --bg-panel: rgba(21, 24, 32, 0.90); --border: rgba(45, 51, 66, 0.8);
+    --text-main:#e2e8f0; --text-muted:#94a3b8;
+    --c-cyan:#0ea5e9; --c-green:#10b981; --c-orange:#f59e0b; --c-red:#ef4444;
+}
+
+.hud-panel{
+    position:fixed; background:var(--bg-panel); backdrop-filter:blur(10px);
+    border:1px solid var(--border); border-radius:12px; z-index:9999;
+    display:flex; flex-direction:column; box-shadow:0 12px 30px rgba(0,0,0,.5);
+    transition:transform .3s, opacity .3s, max-height .3s;
+}
+.hud-header{
+    padding:10px 14px; font-size:.8rem; font-weight:bold; color:var(--text-muted);
+    text-transform:uppercase; border-bottom:1px solid var(--border); background:rgba(0,0,0,.3);
+    border-radius:12px 12px 0 0; display:flex; justify-content:space-between; align-items:center; cursor:pointer;
+}
+.hud-content{ padding:12px; overflow-y:auto; display:flex; flex-direction:column; gap:10px; }
+.hud-content::-webkit-scrollbar{ width:5px; }
+.hud-content::-webkit-scrollbar-thumb{ background:var(--border); border-radius:3px; }
+.collapsed .hud-content{ display:none; }
+.toggle-icon{ color:var(--c-cyan); transition:.3s; }
+.collapsed .toggle-icon{ transform:rotate(-90deg); }
+
+#panel-controls{ top:10px; left:10px; width:280px; max-height:calc(100vh - 20px); }
+#panel-telemetry{ top:10px; right:10px; width:170px; }
+
+.main-actions{ display:grid; grid-template-columns:1fr 1fr; gap:6px; margin-bottom:4px; }
+button, select{ font-size:.8rem; font-weight:bold; padding:9px 6px; border-radius:6px; cursor:pointer;
+    border:none; width:100%; color:white; }
+.btn-play{ background:var(--c-green); }
+.btn-pause{ background:var(--c-orange); color:black; }
+.btn-stop{ background:var(--c-red); grid-column:span 2; }
+.mode-select{ background:rgba(0,0,0,.5); color:var(--c-cyan); border:1px solid var(--border); grid-column:span 2; }
+
+.control-group{ background:rgba(0,0,0,.25); padding:9px; border-radius:8px; border:1px solid rgba(255,255,255,.05); }
+.control-group-title{ font-size:.7rem; color:var(--c-cyan); margin-bottom:7px; text-transform:uppercase; letter-spacing:1px; }
+.control{ display:flex; flex-direction:column; gap:5px; margin-bottom:7px; }
+.control:last-child{ margin-bottom:0; }
+.control-label{ display:flex; justify-content:space-between; font-size:.78rem; }
+.val{ font-family:monospace; font-weight:bold; color:var(--text-main); font-size:.82rem; }
+
+input[type=range]{ -webkit-appearance:none; width:100%; background:transparent; }
+input[type=range]::-webkit-slider-thumb{ -webkit-appearance:none; height:18px; width:18px; border-radius:50%;
+    background:var(--c-cyan); cursor:pointer; margin-top:-7px; box-shadow:0 0 8px rgba(14,165,233,.5); }
+input[type=range]::-webkit-slider-runnable-track{ width:100%; height:4px; background:var(--border); border-radius:2px; }
+input[type=range]:disabled::-webkit-slider-thumb{ background:var(--text-muted); }
+
+.btn-action{ background:#2d3342; color:white; padding:7px; font-size:.72rem; margin-top:4px; }
+.counter-badge{ color:var(--c-orange); font-family:monospace; }
+label.check{ font-size:.72rem; display:flex; align-items:center; gap:6px; margin-top:6px; cursor:pointer; color:var(--text-muted); }
+
+#regime-indicator{ padding:8px; border-radius:6px; text-align:center; font-weight:bold; font-size:.72rem;
+    letter-spacing:.5px; margin-bottom:8px; background:transparent; color:var(--text-muted); }
+.card-grid{ display:grid; grid-template-columns:1fr; gap:6px; }
+.card{ background:rgba(0,0,0,.3); border:1px solid var(--border); border-radius:8px; padding:6px; text-align:center; }
+.card-title{ font-size:.6rem; color:var(--text-muted); text-transform:uppercase; margin-bottom:3px; }
+.card-value{ font-size:.95rem; font-family:monospace; font-weight:bold; }
+.card-value.highlight{ color:var(--c-green); }
+
+.btn-exit{ position:fixed; top:calc(env(safe-area-inset-top,10px) + 4px); left:50%; transform:translateX(-50%);
+    z-index:10000; width:auto; padding:10px 22px; background:var(--c-red); }
+</style>
+</head>
+<body>
+
+<a-scene embedded vr-mode-ui="enabled:false" arjs="sourceType:webcam; debugUIEnabled:false;">
+    <a-marker preset="hiro">
+        <a-cylinder radius="0.10" height="0.30" position="0 -0.15 0" color="#64748b"></a-cylinder>
+        <a-cylinder radius="0.32" height="0.05" position="0 -0.025 0" color="#2d3342"></a-cylinder>
+        <a-cylinder id="wall" radius="0.30" height="3.0" position="0 1.5 0" color="#0ea5e9" opacity="0.18" material="side:double"></a-cylinder>
+        <a-cylinder radius="0.32" height="0.05" position="0 3.0 0" color="#475569"></a-cylinder>
+        <a-entity id="flow-container"></a-entity>
+        <a-entity id="particles-container"></a-entity>
+    </a-marker>
+    <a-entity camera></a-entity>
+</a-scene>
+
+<button class="btn-exit" onclick="salir()">✖ CERRAR RA</button>
+
+<div id="panel-controls" class="hud-panel">
+    <div class="hud-header" onclick="this.parentElement.classList.toggle('collapsed')">
+        <span>⚙️ Control Granular</span><span class="toggle-icon">▼</span>
+    </div>
+    <div class="hud-content">
+        <div class="main-actions">
+            <button id="btn-play" class="btn-play" onclick="accion('play')">▶ COMENZAR</button>
+            <button id="btn-freeze" class="btn-pause" onclick="accion('freeze')">⏸ PAUSAR</button>
+            <button class="btn-stop" onclick="accion('stopFlow')">⏹ DETENER FLUJO</button>
+            <select id="sel-mode" class="mode-select" onchange="accionMode(this.value)">
+                <option value="sandbox">Modo Sandbox (Manual)</option>
+                <option value="real">Simulación Real (Automático)</option>
+            </select>
+        </div>
+
+        <div class="control-group">
+            <div class="control-group-title">Hidrodinámica del Gas</div>
+            <div class="control">
+                <div class="control-label"><span>Vel. Comandada (u)</span><span class="val" id="lbl-u">0.000 m/s</span></div>
+                <input type="range" id="inp-u" min="0" max="0.8" step="0.001" value="0">
+            </div>
+            <div class="control">
+                <div class="control-label"><span style="color:var(--c-orange);">Radio Activo</span><span class="val" id="lbl-rflujo" style="color:var(--c-orange);">75%</span></div>
+                <input type="range" id="inp-rflujo" min="0.2" max="1.0" step="0.05" value="0.75">
+            </div>
+            <div class="control">
+                <div class="control-label"><span>Densidad Gas (ρf)</span><span class="val" id="lbl-rhof">1.2 kg/m³</span></div>
+                <input type="range" id="inp-rhof" min="0.5" max="3" step="0.1" value="1.2">
+            </div>
+            <div class="control">
+                <div class="control-label"><span>Viscosidad Gas (μ)</span><span class="val" id="lbl-mu">1.80e-5 Pa·s</span></div>
+                <input type="range" id="inp-mu" min="0.00001" max="0.00005" step="0.000001" value="0.000018">
+            </div>
+        </div>
+
+        <div class="control-group">
+            <div class="control-group-title">Materia Granular</div>
+            <div class="control">
+                <div class="control-label"><span>Diámetro (dp)</span><span class="val" id="lbl-dp">0.0017 m</span></div>
+                <input type="range" id="inp-dp" min="0.0001" max="0.003" step="0.0001" value="0.0017">
+            </div>
+            <div class="control">
+                <div class="control-label"><span>Densidad Sólido (ρs)</span><span class="val" id="lbl-rhos">2500 kg/m³</span></div>
+                <input type="range" id="inp-rhos" min="1000" max="4000" step="50" value="2500">
+            </div>
+            <div class="control">
+                <div class="control-label"><span>Altura Inicial (L0)</span><span class="val" id="lbl-l0">0.30 m</span></div>
+                <input type="range" id="inp-l0" min="0.1" max="0.6" step="0.01" value="0.30">
+            </div>
+            <div class="control" style="border-top:1px dashed var(--border); padding-top:8px;">
+                <div class="control-label"><span>Cantidad de Sólidos</span><span class="val counter-badge" id="lbl-particles">1200</span></div>
+                <button class="btn-action" onclick="accion('addParticles',100)">+ Añadir 100</button>
+                <label class="check"><input type="checkbox" id="inp-autoadd" onchange="accion('setAutoAdd', this.checked)"> Alimentación continua</label>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div id="panel-telemetry" class="hud-panel">
+    <div class="hud-header" onclick="this.parentElement.classList.toggle('collapsed')">
+        <span>📊 Telemetría</span><span class="toggle-icon">▼</span>
+    </div>
+    <div class="hud-content">
+        <div id="regime-indicator">REPOSO GRANULAR</div>
+        <div class="card-grid">
+            <div class="card"><div class="card-title">Umf Global</div><div class="card-value highlight" id="out-umf">0.0000</div></div>
+            <div class="card"><div class="card-title">ΔP (Pa)</div><div class="card-value" id="out-deltap">0</div></div>
+            <div class="card"><div class="card-title">Altura (m)</div><div class="card-value" id="out-l">0.000</div></div>
+            <div class="card"><div class="card-title">Reynolds</div><div class="card-value" id="out-re">0.0</div></div>
+        </div>
+    </div>
+</div>
+
+<script>
+//======================================================
+// ChemSim AR — vista sincronizada del simulador principal.
+// NO existe motor físico aquí. Todo llega por postMessage
+// desde index.html (App.Web3D / App.State / App.Physics).
+//======================================================
+
+const H = 3.0;
+const particleContainer = document.getElementById('particles-container');
+const flowContainer = document.getElementById('flow-container');
+
+// ------- Referencias de sliders y labels -------
+const sliders = {
+    u: document.getElementById('inp-u'),
+    rflujo: document.getElementById('inp-rflujo'),
+    rhof: document.getElementById('inp-rhof'),
+    mu: document.getElementById('inp-mu'),
+    dp: document.getElementById('inp-dp'),
+    rhos: document.getElementById('inp-rhos'),
+    l0: document.getElementById('inp-l0')
+};
+const labels = {
+    u: document.getElementById('lbl-u'),
+    rflujo: document.getElementById('lbl-rflujo'),
+    rhof: document.getElementById('lbl-rhof'),
+    mu: document.getElementById('lbl-mu'),
+    dp: document.getElementById('lbl-dp'),
+    rhos: document.getElementById('lbl-rhos'),
+    l0: document.getElementById('lbl-l0')
+};
+
+// Evita que el SYNC entrante pise el valor mientras el usuario arrastra ese slider
+const dragging = new Set();
+Object.keys(sliders).forEach(k => {
+    const el = sliders[k];
+    el.addEventListener('pointerdown', () => dragging.add(k));
+    el.addEventListener('pointerup', () => dragging.delete(k));
+    el.addEventListener('input', () => {
+        renderLabel(k, el.value);
+        // variable enviada a index.html usa la misma clave que App.State.in
+        // (l0 se traduce a l0_base, igual que hace App.UI.init en index.html)
+        enviarControl(k === 'l0' ? 'l0_base' : k, Number(el.value));
+    });
+});
+
+function renderLabel(k, v){
+    v = Number(v);
+    if(k === 'u') labels.u.innerText = v.toFixed(3) + ' m/s';
+    else if(k === 'rflujo') labels.rflujo.innerText = Math.round(v*100) + '%';
+    else if(k === 'rhof') labels.rhof.innerText = v.toFixed(1) + ' kg/m³';
+    else if(k === 'mu') labels.mu.innerText = v.toExponential(2) + ' Pa·s';
+    else if(k === 'dp') labels.dp.innerText = v.toFixed(4) + ' m';
+    else if(k === 'rhos') labels.rhos.innerText = Math.round(v) + ' kg/m³';
+    else if(k === 'l0') labels.l0.innerText = v.toFixed(2) + ' m';
+}
+
+//======================================================
+// Partículas y flechas (idéntico al AR embebido actual
+// de index.html: solo pintan posiciones recibidas)
+//======================================================
+
+const spheres = [];
+let currentCount = 0;
+
+function updateSpheres(targetCount){
+    while(spheres.length < targetCount){
+        let el = document.createElement('a-sphere');
+        el.setAttribute('color', '#f59e0b');
+        el.setAttribute('segments-height', '8');
+        el.setAttribute('segments-width', '8');
+        particleContainer.appendChild(el);
+        spheres.push(el);
+    }
+    for(let i=0; i<spheres.length; i++){
+        spheres[i].setAttribute('visible', i < targetCount);
+    }
+}
+
+const flowCones = [];
+for(let i=0; i<60; i++){
+    let el = document.createElement('a-cone');
+    el.setAttribute('radius-bottom', '0.025');
+    el.setAttribute('radius-top', '0');
+    el.setAttribute('height', '0.12');
+    el.setAttribute('color', '#00BFFF');
+    el.setAttribute('opacity', '0');
+    flowContainer.appendChild(el);
+    flowCones.push({ el, y: Math.random()*H, r: Math.random()*0.25, ang: Math.random()*Math.PI*2 });
+}
+
+//======================================================
+// Recepción de mensajes desde index.html
+//======================================================
+
+window.addEventListener('message', (e) => {
+    const data = e.data;
+    if(!data || !data.type) return;
+
+    if(data.type === 'SYNC'){
+        // --- Partículas (copia exacta de posiciones del DEM real) ---
+        const pos = data.positions, count = data.count, scale = data.scale;
+        const u = data.u, r_activo = data.rflujo * 0.28, isFrozen = data.isFrozen;
+
+        if(currentCount !== count){ currentCount = count; updateSpheres(count); }
+        for(let i=0; i<count; i++){
+            spheres[i].object3D.position.set(pos[i*3], pos[i*3+1], pos[i*3+2]);
+            spheres[i].object3D.scale.set(scale, scale, scale);
+        }
+
+        // --- Flechas de flujo ---
+        const dt = 1/60;
+        const opacity = Math.min(u*2.0, 0.6).toString();
+        flowCones.forEach(cone => {
+            if(u > 0.001){
+                if(!isFrozen){
+                    cone.y += u*dt*4.0;
+                    if(cone.y > H){ cone.y = 0; cone.r = Math.random()*r_activo; cone.ang = Math.random()*Math.PI*2; }
+                }
+                let x = Math.cos(cone.ang)*cone.r, z = Math.sin(cone.ang)*cone.r;
+                cone.el.setAttribute('position', `${x} ${cone.y} ${z}`);
+                cone.el.setAttribute('opacity', opacity);
+            } else {
+                cone.el.setAttribute('opacity', '0');
+            }
+        });
+
+        // --- Reflejar estado (in/out) en el panel, salvo el slider que se está arrastrando ---
+        if(data.in){
+            const map = { u:'u', rflujo:'rflujo', rhof:'rhof', mu:'mu', dp:'dp', rhos:'rhos', l0_base:'l0' };
+            Object.keys(map).forEach(srcKey => {
+                const k = map[srcKey];
+                if(dragging.has(k)) return;
+                const v = data.in[srcKey];
+                if(v === undefined) return;
+                sliders[k].value = v;
+                renderLabel(k, v);
+            });
+        }
+        if(data.out){
+            document.getElementById('lbl-particles').innerText = data.count;
+            document.getElementById('out-umf').innerText = (data.out.umf_global ?? 0).toFixed(4);
+            document.getElementById('out-deltap').innerText = (data.out.deltap ?? 0).toFixed(0);
+            document.getElementById('out-l').innerText = (data.out.l_exp ?? 0).toFixed(3);
+            document.getElementById('out-re').innerText = (data.out.re ?? 0).toFixed(2);
+            const ind = document.getElementById('regime-indicator');
+            if(data.out.regimen){
+                ind.innerText = data.out.regimen;
+                ind.style.color = data.out.regimen.includes('REPOSO') ? 'var(--text-muted)'
+                    : (data.out.regimen.includes('FIJO') ? 'var(--c-orange)'
+                    : (data.out.regimen.includes('TRANSICIÓN') ? 'var(--c-red)' : 'var(--c-green)'));
+            }
+        }
+        if(data.mode) document.getElementById('sel-mode').value = data.mode;
+        if(typeof data.isRunning === 'boolean'){
+            // deshabilita "u" cuando el modo real controla la velocidad automáticamente
+            sliders.u.disabled = (data.mode === 'real');
+        }
+    }
+});
+
+//======================================================
+// Envío de comandos hacia index.html
+//======================================================
+
+function enviarControl(variable, value){
+    if(window.parent !== window){
+        window.parent.postMessage({ type:'AR_CONTROL', variable, value }, '*');
+    }
+}
+
+function accion(action, payload){
+    if(window.parent !== window){
+        window.parent.postMessage({ type:'AR_ACTION', action, payload }, '*');
+    }
+}
+
+function accionMode(value){ accion('changeMode', value); }
+
+function salir(){
+    if(window.parent !== window){
+        window.parent.postMessage({ type:'AR_ACTION', action:'closeAR' }, '*');
+    }
+}
+
+// Avisa a index.html que ya está listo para recibir el estado completo
+window.addEventListener('load', () => {
+    if(window.parent !== window){
+        window.parent.postMessage({ type:'AR_READY' }, '*');
+    }
+});
+</script>
+</body>
+</html>
